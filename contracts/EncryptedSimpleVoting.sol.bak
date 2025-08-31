@@ -1,0 +1,188 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@fhevm/solidity/lib/FHE.sol";
+import {SepoliaConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
+
+/**
+ * @title EncryptedSimpleVoting
+ * @dev A voting contract using Fully Homomorphic Encryption (FHE) for private voting
+ * @notice This contract demonstrates how to convert a standard voting contract to use FHEVM
+ */
+contract EncryptedSimpleVoting is SepoliaConfig {
+    enum VotingStatus {
+        Open,
+        DecryptionInProgress,
+        ResultsDecrypted
+    }
+    
+    mapping(address => bool) public hasVoted;
+    
+    VotingStatus public status;
+    
+    // Decrypted results (only available after decryption)
+    uint64 public decryptedYesVotes;
+    uint64 public decryptedNoVotes;
+    
+    uint256 public voteDeadline;
+    address public owner;
+    string public description;
+    
+    // Encrypted vote counters
+    euint64 private encryptedYesVotes;
+    euint64 private encryptedNoVotes;
+    
+    event VoteCast(address indexed voter);
+    event VotingCreated(string description, uint256 deadline);
+    event DecryptionRequested(uint256 requestId);
+    event ResultsDecrypted(uint64 yesVotes, uint64 noVotes);
+    
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner can call this function");
+        _;
+    }
+    
+    modifier votingOpen() {
+        require(block.timestamp <= voteDeadline, "Voting period has ended");
+        require(status == VotingStatus.Open, "Voting is not open");
+        _;
+    }
+    
+    constructor(string memory _description, uint256 _durationInMinutes) {
+        owner = msg.sender;
+        description = _description;
+        voteDeadline = block.timestamp + (_durationInMinutes * 1 minutes);
+        status = VotingStatus.Open;
+        
+        // Initialize encrypted counters to 0
+        encryptedYesVotes = FHE.asEuint64(0);
+        encryptedNoVotes = FHE.asEuint64(0);
+
+        // Allow this contract to perform operations on encrypted data
+        FHE.allowThis(encryptedYesVotes);
+        FHE.allowThis(encryptedNoVotes);
+        
+        emit VotingCreated(_description, voteDeadline);
+    }
+
+    /**
+     * @dev Cast an encrypted vote
+     * @param support Encrypted boolean indicating vote choice
+     * @param inputProof Proof for the encrypted input
+     */
+    function vote(externalEbool support, bytes memory inputProof) public votingOpen {
+        require(!hasVoted[msg.sender], "Already voted");
+        hasVoted[msg.sender] = true;
+        
+        // Convert external encrypted boolean to internal encrypted boolean
+        ebool isSupport = FHE.fromExternal(support, inputProof);
+        
+        // Use homomorphic select to update vote counts
+        // If isSupport is true, increment yesVotes, otherwise increment noVotes
+        encryptedYesVotes = FHE.select(isSupport, FHE.add(encryptedYesVotes, 1), encryptedYesVotes);
+        encryptedNoVotes = FHE.select(isSupport, encryptedNoVotes, FHE.add(encryptedNoVotes, 1));
+        
+        // Update permissions for the encrypted values
+        FHE.allowThis(encryptedYesVotes);
+        FHE.allowThis(encryptedNoVotes);
+        
+        emit VoteCast(msg.sender);
+    }
+    
+    /**
+     * @dev Alternative vote function that takes a plaintext boolean and encrypts it
+     * @param support Plaintext boolean for vote choice
+     */
+    function votePlaintext(bool support) public votingOpen {
+        require(!hasVoted[msg.sender], "Already voted");
+        hasVoted[msg.sender] = true;
+        
+        // Convert plaintext boolean to encrypted boolean
+        ebool isSupport = FHE.asEbool(support);
+        
+        // Use homomorphic operations to update vote counts
+        encryptedYesVotes = FHE.select(isSupport, FHE.add(encryptedYesVotes, 1), encryptedYesVotes);
+        encryptedNoVotes = FHE.select(isSupport, encryptedNoVotes, FHE.add(encryptedNoVotes, 1));
+        
+        // Update permissions
+        FHE.allowThis(encryptedYesVotes);
+        FHE.allowThis(encryptedNoVotes);
+        
+        emit VoteCast(msg.sender);
+    }
+
+    /**
+     * @dev Request decryption of vote results (can only be called after voting ends)
+     */
+    function requestVoteDecryption() public {
+        require(block.timestamp > voteDeadline, "Voting is not finished");
+        require(status == VotingStatus.Open, "Decryption already requested");
+        
+        // Prepare ciphertexts for decryption
+        bytes32[] memory cts = new bytes32[](2);
+        cts[0] = FHE.toBytes32(encryptedYesVotes);
+        cts[1] = FHE.toBytes32(encryptedNoVotes);
+        
+        // Request decryption from the oracle
+        uint256 requestId = FHE.requestDecryption(cts, this.callbackDecryptVotes.selector);
+        status = VotingStatus.DecryptionInProgress;
+        
+        emit DecryptionRequested(requestId);
+    }
+
+    /**
+     * @dev Callback function for decryption results
+     * @param requestId The ID of the decryption request
+     * @param yesVotes Decrypted yes votes count
+     * @param noVotes Decrypted no votes count
+     * @param signatures Cryptographic signatures for verification
+     */
+    function callbackDecryptVotes(
+        uint256 requestId,
+        uint64 yesVotes,
+        uint64 noVotes,
+        bytes[] memory signatures
+    ) public {
+        // Verify the signatures to ensure the decryption is valid
+        FHE.checkSignatures(requestId, signatures);
+        
+        // Store the decrypted results
+        decryptedYesVotes = yesVotes;
+        decryptedNoVotes = noVotes;
+        status = VotingStatus.ResultsDecrypted;
+        
+        emit ResultsDecrypted(yesVotes, noVotes);
+    }
+
+    /**
+     * @dev Get the decrypted vote results (only available after decryption)
+     * @return yes count and no count
+     */
+    function getResults() public view returns (uint64, uint64) {
+        require(status == VotingStatus.ResultsDecrypted, "Results were not decrypted");
+        return (decryptedYesVotes, decryptedNoVotes);
+    }
+    
+    /**
+     * @dev Check if voting period is still active
+     */
+    function isVotingActive() public view returns (bool) {
+        return block.timestamp <= voteDeadline && status == VotingStatus.Open;
+    }
+    
+    /**
+     * @dev Get voting information
+     */
+    function getVotingInfo() public view returns (string memory, uint256, bool, VotingStatus) {
+        return (description, voteDeadline, isVotingActive(), status);
+    }
+    
+    /**
+     * @dev Get current status information
+     */
+    function getStatus() public view returns (VotingStatus, bool, bool) {
+        bool votingEnded = block.timestamp > voteDeadline;
+        bool canRequestDecryption = votingEnded && status == VotingStatus.Open;
+        return (status, votingEnded, canRequestDecryption);
+    }
+}
