@@ -399,7 +399,6 @@ contract EncryptedVoting is SepoliaConfig {
 ### **Development Setup:**
 ```bash
 # Clone and setup
-cd D:\web3\dapp12
 npm install
 npx hardhat compile
 
