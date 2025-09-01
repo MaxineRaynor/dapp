@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DApp12 Frontend</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 DApp12 Frontend</h1>
+            <p>Web3 DApp Interface</p>
+        </div>
+        
+        <div class="section">
+            <h3>📱 Connection Status</h3>
+            <div id="connection-status" class="status">Not Connected</div>
+            <button onclick="connectWallet()">Connect Wallet</button>
+            <button onclick="switchToSepolia()" style="background-color: #17a2b8;">Switch to Sepolia</button>
+        </div>
+        
+        <div class="section">
+            <h3>📊 Contract Information</h3>
+            <div id="contract-info" class="status">
+                <p><strong>Network:</strong> <span id="network">Not Connected</span></p>
+                <p><strong>Account:</strong> <span id="account">Not Connected</span></p>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h3>🗳️ Voting Contracts</h3>
+            <div id="contracts-list">
+                <h4>📊 SimpleVoting Contract</h4>
+                <p>Standard transparent voting system</p>
+                <input type="text" id="simple-voting-address" placeholder="Enter SimpleVoting contract address (0x...)" style="width: 100%; margin: 5px 0; padding: 8px;">
+                <button onclick="loadSimpleVotingContract()">Load SimpleVoting</button>
+                <button onclick="useTestAddress('simple')" style="background-color: #6c757d;">Use Test Address</button>
+                
+                <h4>🔐 EncryptedSimpleVotingSimplified Contract</h4>
+                <p>Privacy-focused encrypted voting (demo version)</p>
+                <input type="text" id="encrypted-voting-address" placeholder="Enter EncryptedVoting contract address (0x...)" style="width: 100%; margin: 5px 0; padding: 8px;">
+                <button onclick="loadEncryptedVotingContract()">Load Encrypted Voting</button>
+                <button onclick="useTestAddress('encrypted')" style="background-color: #6c757d;">Use Test Address</button>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h3>🗳️ Voting Interface</h3>
+            <div id="voting-interface" style="display:none;">
+                <h4 id="contract-title">Contract Loaded</h4>
+                <div id="voting-info">
+                    <p><strong>Description:</strong> <span id="description">-</span></p>
+                    <p><strong>Deadline:</strong> <span id="deadline">-</span></p>
+                    <p><strong>Status:</strong> <span id="voting-status">-</span></p>
+                </div>
+                
+                <div id="vote-controls" style="margin: 20px 0;">
+                    <h5>Cast Your Vote:</h5>
+                    <button onclick="castVote(true)" style="background-color: #28a745;">Vote YES</button>
+                    <button onclick="castVote(false)" style="background-color: #dc3545;">Vote NO</button>
+                </div>
+                
+                <div id="results-section">
+                    <h5>Results:</h5>
+                    <div id="vote-results">
+                        <p>Yes Votes: <span id="yes-votes">-</span></p>
+                        <p>No Votes: <span id="no-votes">-</span></p>
+                    </div>
+                    <button onclick="getResults()">Get Results</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h3>⚡ Quick Actions</h3>
+            <button onclick="refreshStatus()">Refresh Status</button>
+            <button onclick="viewDeployments()">View Deployments</button>
+        </div>
+    </div>
+
+    <script>
+        let web3;
+        let account;
+        let currentContract;
+        let currentContractType;
+
+        // Sepolia network configuration
+        const SEPOLIA_CHAIN_ID = '0xaa36a7'; // 11155111 in hex
+        const SEPOLIA_CONFIG = {
+            chainId: SEPOLIA_CHAIN_ID,
+            chainName: 'Sepolia test network',
+            rpcUrls: ['https://sepolia.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161'],
+            nativeCurrency: {
+                name: 'SepoliaETH',
+                symbol: 'SEP',
+                decimals: 18,
+            },
+            blockExplorerUrls: ['https://sepolia.etherscan.io/'],
+        };
+
+        // Test contract addresses (to be updated after deployment)
+        const TEST_ADDRESSES = {
+            simple: '0x...', // Will be updated after deployment
+            encrypted: '0x...', // Will be updated after deployment
+        };
+
+        // Contract ABIs (updated for gas-optimized versions)
+        const SimpleVotingABI = [
+            "function vote(bool support) external",
+            "function getResults() external view returns (uint32, uint32)",
+            "function getVotingInfo() external view returns (string memory, uint256, bool)",
+            "function isVotingActive() external view returns (bool)",
+            "function hasVoted(address) external view returns (bool)"
+        ];
+
+        const EncryptedVotingABI = [
+            "function votePlaintext(bool support) external",
+            "function voteEncrypted(bytes32 encryptedSupport) external",
+            "function getResults() external view returns (uint32, uint32)",
+            "function getVotingInfo() external view returns (string memory, uint256, bool, uint8)",
+            "function isVotingActive() external view returns (bool)",
+            "function hasVoted(address) external view returns (bool)",
+            "function requestVoteDecryption() external",
+            "function getStatus() external view returns (uint8, bool, bool, uint256)",
+            "function getVoteCount() external view returns (uint256)"
+        ];
+
+        async function connectWallet() {
+            try {
+                if (typeof window.ethereum !== 'undefined') {
+                    await window.ethereum.request({ method: 'eth_requestAccounts' });
+                    web3 = new Web3(window.ethereum);
+                    const accounts = await web3.eth.getAccounts();
+                    account = accounts[0];
+                    
+                    document.getElementById('connection-status').textContent = '✅ Connected';
+                    document.getElementById('account').textContent = account;
+                    
+                    const networkId = await web3.eth.net.getId();
+                    const networkName = getNetworkName(networkId);
+                    document.getElementById('network').textContent = `${networkName} (${networkId})`;
+                    
+                    if (networkId !== 11155111) {
+                        document.getElementById('connection-status').innerHTML = '⚠️ Connected - Switch to Sepolia recommended';
+                    }
+                    
+                    console.log('Wallet connected:', account, 'Network:', networkId);
+                } else {
+                    alert('Please install MetaMask or another Web3 wallet!');
+                }
+            } catch (error) {
+                console.error('Error connecting wallet:', error);
+                alert('Error connecting wallet. Check console for details.');
+            }
+        }
+
+        function getNetworkName(networkId) {
+            const networks = {
+                1: 'Ethereum Mainnet',
+                11155111: 'Sepolia Testnet',
+                1337: 'Localhost',
+                5: 'Goerli Testnet'
+            };
+            return networks[networkId] || `Unknown Network`;
+        }
+
+        async function switchToSepolia() {
+            try {
+                // Request to switch to Sepolia
+                await window.ethereum.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: SEPOLIA_CHAIN_ID }],
+                });
+                
+                // Refresh connection status
+                setTimeout(connectWallet, 1000);
+                
+            } catch (switchError) {
+                // If Sepolia is not added to wallet, add it
+                if (switchError.code === 4902) {
+                    try {
+                        await window.ethereum.request({
+                            method: 'wallet_addEthereumChain',
+                            params: [SEPOLIA_CONFIG],
+                        });
+                        setTimeout(connectWallet, 1000);
+                    } catch (addError) {
+                        console.error('Error adding Sepolia network:', addError);
+                        alert('Failed to add Sepolia network');
+                    }
+                } else {
+                    console.error('Error switching to Sepolia:', switchError);
+                    alert('Failed to switch to Sepolia network');
+                }
+            }
+        }
+
+        function useTestAddress(type) {
+            if (type === 'simple') {
+                document.getElementById('simple-voting-address').value = TEST_ADDRESSES.simple;
+                if (TEST_ADDRESSES.simple === '0x...') {
+                    alert('请先部署合约到Sepolia，然后更新TEST_ADDRESSES中的地址');
+                }
+            } else if (type === 'encrypted') {
+                document.getElementById('encrypted-voting-address').value = TEST_ADDRESSES.encrypted;
+                if (TEST_ADDRESSES.encrypted === '0x...') {
+                    alert('请先部署合约到Sepolia，然后更新TEST_ADDRESSES中的地址');
+                }
+            }
+        }
+
+        async function loadSimpleVotingContract() {
+            if (!web3) {
+                alert('Please connect your wallet first!');
+                return;
+            }
+
+            const contractAddress = document.getElementById('simple-voting-address').value.trim();
+            if (!contractAddress || !contractAddress.startsWith('0x') || contractAddress.length !== 42) {
+                alert('Please enter a valid contract address (0x followed by 40 hex characters)');
+                return;
+            }
+
+            try {
+                currentContract = new web3.eth.Contract(SimpleVotingABI, contractAddress);
+                currentContractType = 'simple';
+                document.getElementById('contract-title').textContent = '📊 SimpleVoting Contract';
+                await loadVotingInfo();
+                document.getElementById('voting-interface').style.display = 'block';
+                
+                console.log('SimpleVoting contract loaded:', contractAddress);
+            } catch (error) {
+                console.error('Error loading SimpleVoting contract:', error);
+                alert('Error loading contract. Please check the address and network.');
+            }
+        }
+
+        async function loadEncryptedVotingContract() {
+            if (!web3) {
+                alert('Please connect your wallet first!');
+                return;
+            }
+
+            const contractAddress = document.getElementById('encrypted-voting-address').value.trim();
+            if (!contractAddress || !contractAddress.startsWith('0x') || contractAddress.length !== 42) {
+                alert('Please enter a valid contract address (0x followed by 40 hex characters)');
+                return;
+            }
+
+            try {
+                currentContract = new web3.eth.Contract(EncryptedVotingABI, contractAddress);
+                currentContractType = 'encrypted';
+                document.getElementById('contract-title').textContent = '🔐 EncryptedSimpleVotingSimplified Contract';
+                await loadVotingInfo();
+                document.getElementById('voting-interface').style.display = 'block';
+                
+                console.log('EncryptedVoting contract loaded:', contractAddress);
+            } catch (error) {
+                console.error('Error loading EncryptedVoting contract:', error);
+                alert('Error loading contract. Please check the address and network.');
+            }
+        }
+
+        async function loadVotingInfo() {
+            try {
+                const votingInfo = await currentContract.methods.getVotingInfo().call();
+                document.getElementById('description').textContent = votingInfo[0];
+                
+                const deadline = new Date(parseInt(votingInfo[1]) * 1000);
+                document.getElementById('deadline').textContent = deadline.toLocaleString();
+                
+                const isActive = votingInfo[2];
+                document.getElementById('voting-status').textContent = isActive ? '🟢 Active' : '🔴 Ended';
+                
+                console.log('Voting info loaded:', votingInfo);
+            } catch (error) {
+                console.error('Error loading voting info:', error);
+            }
+        }
+
+        async function castVote(support) {
+            if (!currentContract || !account) {
+                alert('Please connect wallet and load a contract first!');
+                return;
+            }
+
+            try {
+                const hasAlreadyVoted = await currentContract.methods.hasVoted(account).call();
+                if (hasAlreadyVoted) {
+                    alert('You have already voted!');
+                    return;
+                }
+
+                let tx;
+                if (currentContractType === 'simple') {
+                    tx = await currentContract.methods.vote(support).send({ from: account });
+                } else {
+                    tx = await currentContract.methods.votePlaintext(support).send({ from: account });
+                }
+
+                console.log('Vote transaction:', tx);
+                alert(`Vote cast successfully! ${support ? 'YES' : 'NO'} vote recorded.`);
+                await loadVotingInfo(); // Refresh status
+            } catch (error) {
+                console.error('Error casting vote:', error);
+                alert('Error casting vote. Check console for details.');
+            }
+        }
+
+        async function getResults() {
+            if (!currentContract) {
+                alert('Please load a contract first!');
+                return;
+            }
+
+            try {
+                const results = await currentContract.methods.getResults().call();
+                document.getElementById('yes-votes').textContent = results[0];
+                document.getElementById('no-votes').textContent = results[1];
+                
+                console.log('Results:', results);
+                alert(`Results loaded: ${results[0]} YES votes, ${results[1]} NO votes`);
+            } catch (error) {
+                console.error('Error getting results:', error);
+                if (error.message.includes('Results were not decrypted')) {
+                    alert('Results not yet decrypted. For encrypted voting, request decryption first.');
+                } else {
+                    alert('Error getting results. Check console for details.');
+                }
+            }
+        }
+
+        function refreshStatus() {
+            if (!web3) {
+                alert('Please connect your wallet first!');
+                return;
+            }
+            if (currentContract) {
+                loadVotingInfo();
+            }
+            console.log('Status refreshed');
+        }
+
+        function viewDeployments() {
+            console.log('Available voting contracts:');
+            console.log('- SimpleVoting.sol - Standard transparent voting');
+            console.log('- EncryptedSimpleVotingSimplified.sol - Privacy-focused voting (demo)');
+            console.log('');
+            console.log('To deploy contracts:');
+            console.log('1. npx hardhat compile');
+            console.log('2. npx hardhat node (in separate terminal)');
+            console.log('3. npx hardhat run scripts/deploy-voting.js --network localhost');
+            alert('Check console for deployment information');
+        }
+
+        // Check if Web3 is available on page load
+        window.addEventListener('load', function() {
+            if (typeof window.ethereum !== 'undefined') {
+                console.log('Web3 wallet detected');
+            } else {
+                console.log('No Web3 wallet detected');
+                document.getElementById('connection-status').textContent = '❌ No Web3 wallet detected';
+            }
+        });
+    </script>
+    
+    <!-- Load Web3.js from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/web3@latest/dist/web3.min.js"></script>
+</body>
+</html>

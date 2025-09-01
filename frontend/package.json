@@ -1,0 +1,14 @@
+{
+  "name": "dapp12-frontend",
+  "version": "1.0.0",
+  "description": "Frontend for DApp12",
+  "main": "index.js",
+  "scripts": {
+    "start": "python -m http.server 3012",
+    "dev": "python -m http.server 3012"
+  },
+  "dependencies": {
+    "web3": "^4.0.0",
+    "ethers": "^6.0.0"
+  }
+}
